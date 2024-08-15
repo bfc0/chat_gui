@@ -14,7 +14,6 @@ async def register(host: str, port: int, name: str):
     await read_line(r)
     await send_line(w, "\n")
     await read_line(r)
-    name = name or input()
     await send_line(w, name)
     result = await read_line(r)
 
