@@ -10,27 +10,34 @@ URL = "minechat.dvmn.org"
 
 
 async def register(host: str, port: int, name: str):
-    r, w = await asyncio.open_connection(host, port)
-    await read_line(r)
-    await send_line(w, "\n")
-    await read_line(r)
-    await send_line(w, name)
-    result = await read_line(r)
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.open_connection(host, port)
+        await read_line(reader)
+        await send_line(writer, "\n")
+        await read_line(reader)
+        await send_line(writer, name)
+        result = await read_line(reader)
 
-    async with aiofiles.open("credentials.json", "w") as f:
-        await f.write(result)
+        async with aiofiles.open("credentials.json", "w") as f:
+            await f.write(result)
 
-    credentials = json.loads(result)
-    hash = credentials["account_hash"]
-    logging.debug(f"Your hash is {hash}")
+        credentials = json.loads(result)
+        hash = credentials["account_hash"]
+        logging.debug(f"Your hash is {hash}")
+
+    finally:
+        if writer:
+            writer.close()
+            await writer.wait_closed()
 
 
 async def authorize(
-    r: asyncio.StreamReader, w: asyncio.StreamWriter, hash: str
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, hash: str
 ) -> bool:
-    _ = await read_line(r)
-    await send_line(w, f"{hash}\n")
-    data = await read_line(r)
+    _ = await read_line(reader)
+    await send_line(writer, f"{hash}\n")
+    data = await read_line(reader)
     credentials = json.loads(data)
 
     return bool(credentials)
@@ -48,16 +55,17 @@ async def get_hash_from_file(filename: str) -> str | None:
 
 
 async def send_message(host: str, port: int, message: str, hash: str) -> bool:
+    writer = None
     try:
-        r, w = await asyncio.open_connection(host, port)
-        result = await authorize(r, w, hash)
+        reader, writer = await asyncio.open_connection(host, port)
+        result = await authorize(reader, writer, hash)
         if not result:
             logging.error("Failed to authorize")
             return False
-        _ = await read_line(r)
-        await send_line(w, message)
+        _ = await read_line(reader)
+        await send_line(writer, message)
 
-        resp = await read_line(r)
+        resp = await read_line(reader)
         if resp.startswith("Message send"):
             logging.debug("Message sent succefully")
             return True
@@ -65,6 +73,11 @@ async def send_message(host: str, port: int, message: str, hash: str) -> bool:
     except Exception as e:
         logging.exception(f"something went wrong: {e}")
         return False
+
+    finally:
+        if writer:
+            writer.close()
+            await writer.wait_closed()
 
     logging.error("Message not sent")
     return False

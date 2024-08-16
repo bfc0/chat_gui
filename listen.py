@@ -12,15 +12,21 @@ async def listen_forever(host: str, port: int, logfile: str):
 
     async with aiofiles.open(logfile, "a") as file:
         while True:
+            writer = None
             try:
-                r, _ = await asyncio.open_connection(host, port)
-                line = unserialize(await r.readline())
+                reader, writer = await asyncio.open_connection(host, port)
+                line = unserialize(await reader.readline())
                 await file.write(logify(line))
                 logging.debug(line)
 
             except Exception as e:
                 logging.exception(f"Something went wrong: {e}")
                 await asyncio.sleep(TIMEOUT_S)
+
+            finally:
+                if writer:
+                    writer.close()
+                    await writer.wait_closed()
 
 
 async def main():
