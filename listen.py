@@ -8,16 +8,21 @@ TIMEOUT_S = 1
 URL = "minechat.dvmn.org"
 
 
-async def listen_forever(host: str, port: int, logfile: str):
+async def listen_forever(host: str, port: int, logfile: str, messages: asyncio.Queue):
 
-    async with aiofiles.open(logfile, "a") as file:
+    async with aiofiles.open(logfile, "a", encoding="utf-8") as file:
         while True:
             writer = None
             try:
                 reader, writer = await asyncio.open_connection(host, port)
                 line = unserialize(await reader.readline())
-                await file.write(logify(line))
+                await messages.put(line)
+                await file.write(line+"\n")
+                await file.flush()
                 logging.debug(line)
+
+            except asyncio.CancelledError:
+                return
 
             except Exception as e:
                 logging.exception(f"Something went wrong: {e}")
@@ -33,7 +38,8 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", help="server address", default=URL)
     parser.add_argument("--port", "-p", help="server port", default=5000)
-    parser.add_argument("--logfile", "-l", help="log filepath", default="./chat.log")
+    parser.add_argument("--logfile", "-l",
+                        help="log filepath", default="./chat.log")
     args = parser.parse_args()
 
     logging.basicConfig(
