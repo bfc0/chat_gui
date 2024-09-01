@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
 
 
@@ -32,3 +33,10 @@ def logify(msg: str) -> str:
     if not msg.endswith("\n"):
         return f"{now} {msg}\n"
     return f"{now} {msg}"
+
+
+@dataclass
+class Queues:
+    receive: asyncio.Queue
+    send: asyncio.Queue
+    status: asyncio.Queue

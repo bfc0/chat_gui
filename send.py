@@ -2,11 +2,15 @@ import asyncio
 import json
 import logging
 import argparse
-
 import aiofiles
+from tkinter import messagebox
 from common import send_line, read_line
 
 URL = "minechat.dvmn.org"
+
+
+class InvalidToken(Exception):
+    pass
 
 
 async def register(host: str, port: int, name: str):
@@ -54,6 +58,41 @@ async def get_hash_from_file(filename: str) -> str | None:
     return hash
 
 
+async def send_forever(host: str, port: int, hash: str, messages: asyncio.Queue):
+    while True:
+        writer = None
+        try:
+            if not writer or writer.is_closing():
+                reader, writer = await asyncio.open_connection(host, port)
+                result = await authorize(reader, writer, hash)
+
+                if not result:
+                    logging.error("Failed to authorize")
+                    messagebox.showerror(
+                        "Exception",
+                        "Не удалось авторизоваться. Неверный токен."
+                    )
+                    raise InvalidToken
+                _ = await read_line(reader)
+
+            message = await messages.get()
+            _ = await read_line(reader)
+            await send_line(writer, message)
+
+            resp = await read_line(reader)
+            if resp.startswith("Message send"):
+                logging.debug("Message sent succefully")
+            else:
+                logging.debug(f"Unexpected response: {resp}")
+
+        except asyncio.CancelledError:
+            return
+
+        except Exception as e:
+            logging.warning(f"An error occured: {e}")
+            await asyncio.sleep(1)
+
+
 async def send_message(host: str, port: int, message: str, hash: str) -> bool:
     writer = None
     try:
@@ -87,7 +126,8 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", help="server address", default=URL)
     parser.add_argument("--port", "-p", help="server port", default=5050)
-    parser.add_argument("--register", "-r", help="register [name]", action="store_true")
+    parser.add_argument("--register", "-r",
+                        help="register [name]", action="store_true")
     parser.add_argument("message", help="message", nargs="+", type=str)
     parser.add_argument(
         "--credentials", help="credentials file", default="./credentials.json"

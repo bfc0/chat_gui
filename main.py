@@ -3,8 +3,10 @@ import asyncio
 import logging
 import aiofiles
 import gui
+from tkinter import TclError
 from listen import listen_forever
-from send import
+from send import send_forever, get_hash_from_file
+from common import Queues
 
 TIMEOUT_S = 1
 URL = "minechat.dvmn.org"
@@ -23,8 +25,12 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", help="server address", default=URL)
     parser.add_argument("--port", "-p", help="server port", default=5000)
-    parser.add_argument("--logfile", "-l",
-                        help="log filepath", default="./chat.log")
+    parser.add_argument("--sendport", "-sp", help="send port", default=5050)
+    parser.add_argument(
+        "--logfile", "-l", help="log filepath", default="./chat.log")
+    parser.add_argument(
+        "--credentials", help="credentials file", default="./credentials.json"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -38,6 +44,10 @@ async def main():
     status_updates_queue = asyncio.Queue()
 
     await restore_chat(args.logfile, messages_queue)
+    hash = await get_hash_from_file(args.credentials)
+    send = loop.create_task(send_forever(
+        args.host, args.sendport, hash, sending_queue
+    ))
 
     listen = loop.create_task(listen_forever(
         args.host, args.port, args.logfile, messages_queue))
@@ -49,5 +59,8 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+
     except KeyboardInterrupt:
         logging.debug("Shutting down")
+    except TclError:
+        logging.debug("gui error")
