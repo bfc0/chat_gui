@@ -4,7 +4,8 @@ import logging
 import argparse
 import aiofiles
 from tkinter import messagebox
-from common import send_line, read_line
+from common import Queues, send_line, read_line
+import gui
 
 URL = "minechat.dvmn.org"
 
@@ -37,12 +38,15 @@ async def register(host: str, port: int, name: str):
 
 
 async def authorize(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, hash: str
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, hash: str, queues: Queues
 ) -> bool:
     _ = await read_line(reader)
     await send_line(writer, f"{hash}\n")
     data = await read_line(reader)
     credentials = json.loads(data)
+
+    if name := credentials.get("nickname"):
+        queues.status.put_nowait(gui.NicknameReceived(name))
 
     return bool(credentials)
 
@@ -58,13 +62,16 @@ async def get_hash_from_file(filename: str) -> str | None:
     return hash
 
 
-async def send_forever(host: str, port: int, hash: str, messages: asyncio.Queue):
+async def send_forever(host: str, port: int, hash: str, queues: Queues):
     while True:
         writer = None
         try:
             if not writer or writer.is_closing():
+                queues.status.put_nowait(
+                    gui.SendingConnectionStateChanged.INITIATED)
+
                 reader, writer = await asyncio.open_connection(host, port)
-                result = await authorize(reader, writer, hash)
+                result = await authorize(reader, writer, hash, queues)
 
                 if not result:
                     logging.error("Failed to authorize")
@@ -74,8 +81,10 @@ async def send_forever(host: str, port: int, hash: str, messages: asyncio.Queue)
                     )
                     raise InvalidToken
                 _ = await read_line(reader)
+                queues.status.put_nowait(
+                    gui.SendingConnectionStateChanged.ESTABLISHED)
 
-            message = await messages.get()
+            message = await queues.send.get()
             _ = await read_line(reader)
             await send_line(writer, message)
 

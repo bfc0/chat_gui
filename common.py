@@ -40,3 +40,4 @@ class Queues:
     receive: asyncio.Queue
     send: asyncio.Queue
     status: asyncio.Queue
+    watchdog: asyncio.Queue
