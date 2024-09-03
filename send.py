@@ -64,13 +64,17 @@ async def get_hash_from_file(filename: str) -> str | None:
         hash = credentials["account_hash"]
     except Exception:
         logging.debug("Could not get account hash from credentials file")
-        return None
+        messagebox.showerror(
+            "Exception",
+            "Необходимо зарегистрироваться."
+        )
+        raise InvalidToken
     return hash
 
 
 async def send_forever(host: str, port: int, hash: str, queues: Queues):
-
     writer = None
+
     while True:
         try:
             if not writer or writer.is_closing():
@@ -107,6 +111,6 @@ async def send_forever(host: str, port: int, hash: str, queues: Queues):
 
         except Exception as e:
             logging.warning(f"An error occured: {e}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(TIMEOUT_S)
 
         await asyncio.sleep(0.1)

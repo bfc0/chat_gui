@@ -4,7 +4,7 @@ import logging
 import socket
 import aiofiles
 import gui
-from tkinter import TclError
+from tkinter import TclError, messagebox
 from anyio import create_task_group
 from listen import listen_forever
 from send import InvalidToken, send_forever, get_hash_from_file, pingpong
@@ -82,6 +82,7 @@ async def main():
     )
     await restore_chat(args.logfile, queues)
     hash = await get_hash_from_file(args.credentials)
+
     async with create_task_group() as tg:
         tg.start_soon(gui.draw, queues.receive,
                       queues.send, queues.status)
@@ -93,6 +94,8 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
 
+    except InvalidToken:
+        SystemExit(1)
     except (KeyboardInterrupt, BaseExceptionGroup):
         logging.debug("Shutting down")
     except TclError:
