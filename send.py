@@ -4,23 +4,22 @@ import logging
 import argparse
 import aiofiles
 from tkinter import messagebox
-from common import Queues, send_line, read_line
+from common import Queues, send_line, read_line, TIMEOUT_S, URL, PORT
 import gui
-
-URL = "minechat.dvmn.org"
 
 
 class InvalidToken(Exception):
     pass
 
 
-async def register(host: str, port: int, name: str):
+async def register(host: str = URL, port: int = PORT, name: str = "") -> bool:
     reader = writer = None
     try:
+
         reader, writer = await asyncio.open_connection(host, port)
         await read_line(reader)
-        await send_line(writer, "\n")
-        await read_line(reader)
+        await send_line(writer, "\n".encode("utf-8"))
+        line = await read_line(reader)
         await send_line(writer, name)
         result = await read_line(reader)
 
@@ -37,6 +36,12 @@ async def register(host: str, port: int, name: str):
             await writer.wait_closed()
 
 
+async def pingpong(queues: Queues):
+    while True:
+        queues.send.put_nowait("")
+        await asyncio.sleep(TIMEOUT_S)
+
+
 async def authorize(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, hash: str, queues: Queues
 ) -> bool:
@@ -47,6 +52,7 @@ async def authorize(
 
     if name := credentials.get("nickname"):
         queues.status.put_nowait(gui.NicknameReceived(name))
+        queues.watchdog.put_nowait("Authorized")
 
     return bool(credentials)
 
@@ -63,8 +69,9 @@ async def get_hash_from_file(filename: str) -> str | None:
 
 
 async def send_forever(host: str, port: int, hash: str, queues: Queues):
+
+    writer = None
     while True:
-        writer = None
         try:
             if not writer or writer.is_closing():
                 queues.status.put_nowait(
@@ -83,86 +90,23 @@ async def send_forever(host: str, port: int, hash: str, queues: Queues):
                 _ = await read_line(reader)
                 queues.status.put_nowait(
                     gui.SendingConnectionStateChanged.ESTABLISHED)
+                queues.watchdog.put_nowait("connection established")
 
             message = await queues.send.get()
             _ = await read_line(reader)
             await send_line(writer, message)
-
             resp = await read_line(reader)
-            if resp.startswith("Message send"):
-                logging.debug("Message sent succefully")
-            else:
+
+            if not resp.startswith("Message send"):
                 logging.debug(f"Unexpected response: {resp}")
 
         except asyncio.CancelledError:
-            return
+            if writer:
+                writer.close()
+                await writer.wait_closed()
 
         except Exception as e:
             logging.warning(f"An error occured: {e}")
             await asyncio.sleep(1)
 
-
-async def send_message(host: str, port: int, message: str, hash: str) -> bool:
-    writer = None
-    try:
-        reader, writer = await asyncio.open_connection(host, port)
-        result = await authorize(reader, writer, hash)
-        if not result:
-            logging.error("Failed to authorize")
-            return False
-        _ = await read_line(reader)
-        await send_line(writer, message)
-
-        resp = await read_line(reader)
-        if resp.startswith("Message send"):
-            logging.debug("Message sent succefully")
-            return True
-
-    except Exception as e:
-        logging.exception(f"something went wrong: {e}")
-        return False
-
-    finally:
-        if writer:
-            writer.close()
-            await writer.wait_closed()
-
-    logging.error("Message not sent")
-    return False
-
-
-async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", help="server address", default=URL)
-    parser.add_argument("--port", "-p", help="server port", default=5050)
-    parser.add_argument("--register", "-r",
-                        help="register [name]", action="store_true")
-    parser.add_argument("message", help="message", nargs="+", type=str)
-    parser.add_argument(
-        "--credentials", help="credentials file", default="./credentials.json"
-    )
-    args = parser.parse_args()
-    message = " ".join(args.message)
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(levelname)s: %(message)s",
-    )
-
-    if args.register:
-        await register(args.host, args.port, message)
-        return
-
-    hash = await get_hash_from_file(args.credentials)
-    if not hash:
-        await register(args.host, args.port, "")
-        hash = await get_hash_from_file(args.credentials)
-        if not hash:
-            logging.error("failed to register")
-            return
-
-    await send_message(args.host, args.port, message, hash)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        await asyncio.sleep(0.1)
